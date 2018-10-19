@@ -23,7 +23,6 @@ endif()
 
 # link the library to its dependencies
 target_link_libraries(_${COMPONENT_NAME} PRIVATE ${HOOMD_LIBRARIES})
-target_link_libraries(_${COMPONENT_NAME} PRIVATE ${CUDA_cublas_LIBRARY})
 
 # if we are compiling with MPI support built in, set appropriate
 # compiler/linker flags
@@ -71,6 +70,7 @@ endforeach()
 
 add_custom_target(copy_${COMPONENT_NAME} ALL DEPENDS ${files})
 
-if (BUILD_TESTING)
-    add_subdirectory(test-py)
+if(BUILD_TESTING)
+#add_subdirectory(test-py)
+add_subdirectory(test)
 endif()

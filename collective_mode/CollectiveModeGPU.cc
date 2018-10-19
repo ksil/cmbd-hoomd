@@ -35,15 +35,29 @@ CollectiveModeGPU::CollectiveModeGPU(std::shared_ptr<SystemDefinition> sysdef,
     }
 
     initializeMatrices();
+}
 
-    cublasCreate(&handle);
+CollectiveModeGPU::CollectiveModeGPU(std::shared_ptr<SystemDefinition> sysdef,
+                    std::shared_ptr<ParticleGroup> group,
+                    std::shared_ptr<Variant> T,
+                    unsigned int seed,
+                    Eigen::MatrixXf& ks,
+                    Scalar alpha)
+    : CollectiveMode(sysdef, group, T, seed, ks, alpha)
+{
+    if (!m_exec_conf->isCUDAEnabled())
+    {
+        m_exec_conf->msg->error() << "Creating a CollectiveModeGPU while CUDA is disabled" << endl;
+        throw std::runtime_error("Error initializing CollectiveModeGPU");
+    }
+
+    initializeMatrices();
 }
 
 CollectiveModeGPU::~CollectiveModeGPU()
 {
     m_exec_conf->msg->notice(5) << "Destroying CollectiveModeGPU" << endl;
 
-    cublasDestroy(handle);
     freeMatrices();
 }
 
@@ -59,15 +73,12 @@ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=t
 
 void CollectiveModeGPU::initializeMatrices()
 {
-    cout << "initializeMatrices() called with N=" << N << " Nk=" << Nk << " D=" << D << endl;
-
     cudaMalloc((void **)&d_dft_cos, N*Nk * sizeof(Scalar));
     cudaMalloc((void **)&d_dft_sin, N*Nk * sizeof(Scalar));
     cudaMalloc((void **)&d_ks_mat, Nk*3 * sizeof(Scalar));
     cudaMalloc((void **)&d_ks_norm_mat, Nk*3 * sizeof(Scalar));
     cudaMalloc((void **)&d_A_mat, 9 * sizeof(Scalar));
     cudaMalloc((void **)&d_A_half_mat, 9 * sizeof(Scalar));
-    cudaMalloc((void **)&d_F, N*3 * sizeof(Scalar));
     cudaMalloc((void **)&d_B_T_F_cos, Nk*3 * sizeof(Scalar));
     cudaMalloc((void **)&d_B_T_F_sin, Nk*3 * sizeof(Scalar));
 
@@ -86,9 +97,29 @@ void CollectiveModeGPU::freeMatrices()
     cudaFree(d_ks_norm_mat);
     cudaFree(d_A_mat);
     cudaFree(d_A_half_mat);
-    cudaFree(d_F);
     cudaFree(d_B_T_F_cos);
     cudaFree(d_B_T_F_sin);
+}
+
+void CollectiveModeGPU::set_ks(pybind11::array_t<Scalar> ks)
+{
+    unsigned int old_Nk = Nk;
+    CollectiveMode::set_ks(ks);
+
+    // if the number of wave vectors changes, reallocate memory on the GPU
+    if (old_Nk != Nk)
+    {
+        cudaFree(d_ks_mat);
+        cudaFree(d_ks_norm_mat);
+        cudaMalloc((void **)&d_ks_mat, Nk*3 * sizeof(Scalar));
+        cudaMalloc((void **)&d_ks_norm_mat, Nk*3 * sizeof(Scalar));
+    }
+
+    // copy the new A and ks matrices to the device
+    cudaMemcpy(d_ks_mat, ks_mat.data(), Nk*3 * sizeof(Scalar), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_ks_norm_mat, ks_norm_mat.data(), Nk*3 * sizeof(Scalar), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_A_mat, A_mat.data(), 9 * sizeof(Scalar), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_A_half_mat, A_half_mat.data(), 9 * sizeof(Scalar), cudaMemcpyHostToDevice);
 }
 
 /*! \param timestep Current time step
@@ -102,45 +133,22 @@ void CollectiveModeGPU::integrateStepOne(unsigned int timestep)
 
     // access all the needed data
     BoxDim box = m_pdata->getBox();
-    ArrayHandle< unsigned int > d_index_array(m_group->getIndexArray(), access_location::device, access_mode::read);
+    ArrayHandle<unsigned int> d_index_array(m_group->getIndexArray(), access_location::device, access_mode::read);
 
     ArrayHandle<Scalar4> d_pos(m_pdata->getPositions(), access_location::device, access_mode::readwrite);
     ArrayHandle<int3> d_image(m_pdata->getImages(), access_location::device, access_mode::readwrite);
     ArrayHandle<Scalar4> d_net_force(m_pdata->getNetForce(), access_location::device, access_mode::read);
-    // ArrayHandle<unsigned int> d_tag(m_pdata->getTags(), access_location::device, access_mode::read);
-
-    // for rotational noise
-    // ArrayHandle<Scalar> d_gamma_r(m_gamma_r, access_location::device, access_mode::read);
-    // ArrayHandle<Scalar4> d_orientation(m_pdata->getOrientationArray(), access_location::device, access_mode::readwrite);
-    // ArrayHandle<Scalar4> d_torque(m_pdata->getNetTorqueArray(), access_location::device, access_mode::readwrite);
-    // ArrayHandle<Scalar3> d_inertia(m_pdata->getMomentsOfInertiaArray(), access_location::device, access_mode::read);
-    // ArrayHandle<Scalar4> d_angmom(m_pdata->getAngularMomentumArray(), access_location::device, access_mode::readwrite);
-
-    // unsigned int num_blocks = group_size / m_block_size + 1;
-
-    // langevin_step_two_args args;
-    // args.d_gamma = d_gamma.data;
-    // args.n_types = m_gamma.getNumElements();
-    // args.use_lambda = m_use_lambda;
-    // args.lambda = m_lambda;
-    // args.T = m_T->getValue(timestep);
-    // args.timestep = timestep;
-    // args.seed = m_seed;
-    // args.d_sum_bdenergy = NULL;
-    // args.d_partial_sum_bdenergy = NULL;
-    // args.block_size = m_block_size;
-    // args.num_blocks = num_blocks;
-    // args.tally = false;
-
-    // bool aniso = m_aniso;
+    ArrayHandle<unsigned int> d_tag(m_pdata->getTags(), access_location::device, access_mode::read);
 
     // perform the update on the GPU
     gpu_collective(timestep,
                 m_seed,
+                m_wave_seed,
                 d_pos.data,
                 d_image.data,
                 box,
                 d_index_array.data,
+                d_tag.data,
                 m_alpha,
                 N,
                 Nk,
@@ -148,7 +156,6 @@ void CollectiveModeGPU::integrateStepOne(unsigned int timestep)
                 m_deltaT,
                 D,
                 m_T->getValue(timestep),
-                d_F,
                 d_dft_cos,
                 d_dft_sin,
                 d_B_T_F_cos,
@@ -156,8 +163,7 @@ void CollectiveModeGPU::integrateStepOne(unsigned int timestep)
                 d_ks_mat,
                 d_ks_norm_mat,
                 d_A_mat,
-                d_A_half_mat,
-                handle);
+                d_A_half_mat);
 
     if(m_exec_conf->isCUDAErrorCheckingEnabled())
         CHECK_CUDA_ERROR();

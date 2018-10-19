@@ -12,10 +12,12 @@
 //! Kernel driver for the first part of the Brownian update called by TwoStepBDGPU
 cudaError_t gpu_collective(unsigned int timestep,
                             unsigned int seed,
+                            unsigned int wave_seed,
                             Scalar4* d_pos,
                             int3* d_image,
                             const BoxDim &box,
                             const unsigned int* d_index_array,
+                            const unsigned int* d_tag,
                             const Scalar alpha,
                             const unsigned int N,
                             const unsigned int Nk,
@@ -23,7 +25,6 @@ cudaError_t gpu_collective(unsigned int timestep,
                             const Scalar dt,
                             const unsigned int D,
                             const Scalar T,
-                            Scalar* d_F,
                             Scalar* d_dft_cos,
                             Scalar* d_dft_sin,
                             Scalar* d_B_T_F_cos,
@@ -31,7 +32,6 @@ cudaError_t gpu_collective(unsigned int timestep,
                             const Scalar* d_ks_mat,
                             const Scalar* d_ks_norm_mat,
                             const Scalar* d_A_mat,
-                            const Scalar* d_A_half_mat,
-                            cublasHandle_t handle);
+                            const Scalar* d_A_half_mat);
 
 #endif //__COLLECTIVE_MODE_GPU_CUH__

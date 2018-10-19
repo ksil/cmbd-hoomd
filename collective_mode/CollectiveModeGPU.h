@@ -12,7 +12,6 @@
 #include "CollectiveMode.h"
 #include <hoomd/md/IntegrationMethodTwoStep.h>
 #include <hoomd/extern/pybind/include/pybind11/pybind11.h>
-#include <cublas_v2.h>
 
 //! Integrates part of the system forward with Collective Mode Brownian Dynamics
 /*! Implements the integrator.
@@ -35,6 +34,14 @@ class PYBIND11_EXPORT CollectiveModeGPU : public CollectiveMode
                     Scalar alpha
                     );
 
+        CollectiveModeGPU(std::shared_ptr<SystemDefinition> sysdef,
+                    std::shared_ptr<ParticleGroup> group,
+                    std::shared_ptr<Variant> T,
+                    unsigned int seed,
+                    Eigen::MatrixXf& ks,
+                    Scalar alpha
+                    );
+
         virtual ~CollectiveModeGPU();
 
         //! Performs the first step of the integration
@@ -43,22 +50,22 @@ class PYBIND11_EXPORT CollectiveModeGPU : public CollectiveMode
         //! Performs the second step of the integration
         virtual void integrateStepTwo(unsigned int timestep);
 
+        // set the excited wave vectors
+        virtual void set_ks(pybind11::array_t<Scalar> ks);
+
     protected:
         Scalar* d_dft_cos;
         Scalar* d_dft_sin;
         Scalar* d_B_T_F_cos;
         Scalar* d_B_T_F_sin;
-        Scalar* d_F;
 
         Scalar* d_ks_mat;
         Scalar* d_ks_norm_mat;
         Scalar* d_A_mat;
         Scalar* d_A_half_mat;
 
-        cublasHandle_t handle;
-
-        virtual void initializeMatrices();
-        virtual void freeMatrices();
+        void initializeMatrices();
+        void freeMatrices();
 };
 
 //! Exports the CollectiveModeGPU class to python

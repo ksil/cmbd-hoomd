@@ -24,6 +24,7 @@ class collective(_integration_method):
         # create the compute thermo
         hoomd.compute._get_unique_thermo(group=group);
 
+
         # ensure that the ks numpy array is the right number of dimensions
         if not isinstance(ks, np.ndarray):
             hoomd.context.msg.error("ks must be a Nk x D numpy array, where Nk < 500 and D is the number of dimensions.")
@@ -60,23 +61,21 @@ class collective(_integration_method):
         self.alpha = alpha
         self.metadata_fields = ['group', 'kT', 'seed', 'ks', 'alpha']
 
-    # def set_params(self, kT=None):
-    #     R""" Change langevin integrator parameters.
+    def set_ks(self, ks):
+        # ensure that the ks numpy array is the right number of dimensions
+        if not isinstance(ks, np.ndarray):
+            hoomd.context.msg.error("ks must be a Nk x D numpy array, where Nk < 500 and D is the number of dimensions.")
+            raise RuntimeError("Error creating CollectiveMode")
 
-    #     Args:
-    #         kT (:py:mod:`hoomd.variant` or :py:obj:`float`): New temperature (if set) (in energy units).
+        D = hoomd.context.current.system_definition.getNDimensions()
 
-    #     Examples::
+        if ks.ndim != 2 or ks.shape[1] != D or ks.shape[0] > 500:
+            hoomd.context.msg.error("ks must be a Nk x D numpy array, where Nk < 500 and D is the number of dimensions.")
+            raise RuntimeError("Error creating CollectiveMode")
 
-    #         integrator.set_params(kT=2.0)
+        self.ks = ks
+        self.cpp_method.set_ks(ks)
 
-    #     """
-    #     hoomd.util.print_status_line();
-    #     self.check_initialization();
-
-    #     # change the parameters
-    #     if kT is not None:
-    #         # setup the variant inputs
-    #         kT = hoomd.variant._setup_variant_input(kT);
-    #         self.cpp_method.setT(kT.cpp_variant);
-    #         self.kT = kT
+    def set_alpha(self, alpha):
+        self.alpha = alpha
+        self.cpp_method.set_alpha(alpha)

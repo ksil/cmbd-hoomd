@@ -2,6 +2,7 @@
 #include <hoomd/VectorMath.h>
 #include <hoomd/HOOMDMath.h>
 #include <hoomd/md/IntegrationMethodTwoStep.h>
+#include <random>
 
 #include <hoomd/Saru.h>
 using namespace hoomd;
@@ -34,50 +35,21 @@ CollectiveMode::CollectiveMode(std::shared_ptr<SystemDefinition> sysdef,
                     Scalar alpha
                     )
                     : IntegrationMethodTwoStep(sysdef, group),
-                    m_T(T), m_alpha(alpha)
+                    m_T(T), m_alpha(alpha), m_seed(seed)
 {
     m_exec_conf->msg->notice(5) << "Constructing CollectiveMode" << endl;
 
     // Hash the User's Seed to make it less likely to be a low positive integer
     m_seed = m_seed*0x12345677 + 0x12345 ; m_seed^=(m_seed>>16); m_seed*= 0x45679;
+    std::mt19937 mt_rand(m_seed);
+    m_wave_seed = mt_rand();
     
     // set constants
     D = Scalar(sysdef->getNDimensions());
     N = group->getNumMembers();
-    Nk = ks.shape(0);
 
-    setks(ks);
-    calculateA();
-
-    cout << "ks:\n" << ks_mat << endl;
-    cout << "ks_norm:\n" << ks_norm_mat << endl;
-    cout << "A:\n" << A_mat << endl;
-    cout << "A_half:\n" << A_half_mat << endl;
-
-    initializeMatrices();
-
-}
-
-CollectiveMode::~CollectiveMode()
-{
-    m_exec_conf->msg->notice(5) << "Destroying CollectiveMode" << endl;
-
-    freeMatrices();
-}
-
-void CollectiveMode::initializeMatrices()
-{
-
-}
-
-void CollectiveMode::freeMatrices()
-{
-    
-}
-
-void CollectiveMode::setks(pybind11::array_t<Scalar> ks)
-{
     // copy numpy matrix to Eigen matrix
+    Nk = ks.shape(0);
     auto r = ks.unchecked<2>();
     if (ks.shape(1) != D)
     {
@@ -96,6 +68,87 @@ void CollectiveMode::setks(pybind11::array_t<Scalar> ks)
     }
 
     ks_norm_mat = ks_mat.rowwise().normalized();
+
+    // calculate the self part of the mobility matrix
+    calculateA();
+
+}
+
+CollectiveMode::CollectiveMode(std::shared_ptr<SystemDefinition> sysdef,
+                    std::shared_ptr<ParticleGroup> group,
+                    std::shared_ptr<Variant> T,
+                    unsigned int seed,
+                    Eigen::MatrixXf& ks,
+                    Scalar alpha
+                    )
+                    : IntegrationMethodTwoStep(sysdef, group),
+                    m_T(T), m_alpha(alpha), m_seed(seed)
+{
+    m_exec_conf->msg->notice(5) << "Constructing CollectiveMode" << endl;
+
+    // Hash the User's Seed to make it less likely to be a low positive integer
+    m_seed = m_seed*0x12345677 + 0x12345 ; m_seed^=(m_seed>>16); m_seed*= 0x45679;
+    std::mt19937 mt_rand(m_seed);
+    m_wave_seed = mt_rand();
+    
+    // set constants
+    D = Scalar(sysdef->getNDimensions());
+    N = group->getNumMembers();
+
+    // copy numpy matrix to Eigen matrix
+    Nk = ks.rows();
+    if (ks.cols() != D)
+    {
+        throw std::runtime_error("ks is not a Nk x D array, where D is the number of dimensions");
+    }
+
+    ks_mat.resize(Nk, 3);
+    ks_mat.setZero();
+
+    ks_mat.block(0,0,Nk,D) = ks;
+
+    ks_norm_mat = ks_mat.rowwise().normalized();
+
+    // calculate the self part of the mobility matrix
+    calculateA();
+
+}
+
+CollectiveMode::~CollectiveMode()
+{
+    m_exec_conf->msg->notice(5) << "Destroying CollectiveMode" << endl;
+}
+
+void CollectiveMode::set_ks(pybind11::array_t<Scalar> ks)
+{
+    // copy numpy matrix to Eigen matrix
+    Nk = ks.shape(0);
+    auto r = ks.unchecked<2>();
+    if (ks.shape(1) != D)
+    {
+        throw std::runtime_error("ks is not a Nk x D array, where D is the number of dimensions");
+    }
+
+    ks_mat.resize(Nk, 3);
+    ks_mat.setZero();
+
+    for (unsigned int j = 0; j < D; j++)
+    {
+        for (unsigned int i = 0; i < Nk; i++)
+        {
+            ks_mat(i,j) = r(i,j);
+        }
+    }
+
+    ks_norm_mat = ks_mat.rowwise().normalized();
+
+    // calculate the self part of the mobility matrix
+    calculateA();
+}
+
+void CollectiveMode::set_alpha(Scalar alpha)
+{
+    m_alpha = alpha;
 }
 
 void CollectiveMode::calculateA()

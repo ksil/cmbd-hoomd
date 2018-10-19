@@ -38,6 +38,14 @@ class PYBIND11_EXPORT CollectiveMode : public IntegrationMethodTwoStep
         		    Scalar alpha
                     );
 
+        CollectiveMode(std::shared_ptr<SystemDefinition> sysdef,
+                    std::shared_ptr<ParticleGroup> group,
+                    std::shared_ptr<Variant> T,
+                    unsigned int seed,
+                    Eigen::MatrixXf& ks,
+                    Scalar alpha
+                    );
+
         virtual ~CollectiveMode();
 
         //! Performs the second step of the integration
@@ -46,11 +54,16 @@ class PYBIND11_EXPORT CollectiveMode : public IntegrationMethodTwoStep
         //! Performs the second step of the integration
         virtual void integrateStepTwo(unsigned int timestep);
 
+        // set the excited wave vectors
+        virtual void set_ks(pybind11::array_t<Scalar> ks);
+
+        void set_alpha(Scalar alpha);
+
     protected:
         Eigen::Matrix<Scalar,3,3,RowMajor> A_mat;
         Eigen::Matrix<Scalar,3,3> A_half_mat;
         Eigen::Matrix<Scalar,Dynamic,3,RowMajor> ks_mat;
-        Eigen::Matrix<Scalar,Dynamic,3> ks_norm_mat;
+        Eigen::Matrix<Scalar,Dynamic,3,RowMajor> ks_norm_mat;
 
 
         unsigned int Nk;
@@ -60,11 +73,9 @@ class PYBIND11_EXPORT CollectiveMode : public IntegrationMethodTwoStep
         std::shared_ptr<Variant> m_T;
         Scalar m_alpha;
         unsigned int m_seed;
+        unsigned int m_wave_seed;
 
-        virtual void initializeMatrices();
-        virtual void freeMatrices();
         void calculateA();
-        void setks(pybind11::array_t<Scalar> ks);
 };
 
 //! Exports the CollectiveMode class to python
