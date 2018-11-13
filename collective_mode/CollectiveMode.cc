@@ -48,6 +48,9 @@ CollectiveMode::CollectiveMode(std::shared_ptr<SystemDefinition> sysdef,
     D = Scalar(sysdef->getNDimensions());
     N = group->getNumMembers();
 
+    Scalar3 box_dims = m_pdata->getBox().getL();
+    Scalar L[3] = {box_dims.x, box_dims.y, box_dims.z};
+
     // copy numpy matrix to Eigen matrix
     Nk = ks.shape(0);
     auto r = ks.unchecked<2>();
@@ -63,7 +66,7 @@ CollectiveMode::CollectiveMode(std::shared_ptr<SystemDefinition> sysdef,
     {
         for (unsigned int i = 0; i < Nk; i++)
         {
-            ks_mat(i,j) = r(i,j);
+            ks_mat(i,j) = 2*M_PI*r(i,j) / L[j];
         }
     }
 
@@ -90,10 +93,15 @@ CollectiveMode::CollectiveMode(std::shared_ptr<SystemDefinition> sysdef,
     m_seed = m_seed*0x12345677 + 0x12345 ; m_seed^=(m_seed>>16); m_seed*= 0x45679;
     std::mt19937 mt_rand(m_seed);
     m_wave_seed = mt_rand();
+
+    printf("seed:%u wave_seed:%u\n",m_seed,m_wave_seed);
     
     // set constants
     D = Scalar(sysdef->getNDimensions());
     N = group->getNumMembers();
+
+    Scalar3 box_dims = m_pdata->getBox().getL();
+    Scalar L[3] = {box_dims.x, box_dims.y, box_dims.z};
 
     // copy numpy matrix to Eigen matrix
     Nk = ks.rows();
@@ -107,11 +115,14 @@ CollectiveMode::CollectiveMode(std::shared_ptr<SystemDefinition> sysdef,
 
     ks_mat.block(0,0,Nk,D) = ks;
 
+    ks_mat.col(0) *= 2*M_PI/L[0];
+    ks_mat.col(1) *= 2*M_PI/L[1];
+    if (D == 3) ks_mat.col(2) *= 2*M_PI/L[2];
+
     ks_norm_mat = ks_mat.rowwise().normalized();
 
     // calculate the self part of the mobility matrix
     calculateA();
-
 }
 
 CollectiveMode::~CollectiveMode()
@@ -121,6 +132,10 @@ CollectiveMode::~CollectiveMode()
 
 void CollectiveMode::set_ks(pybind11::array_t<Scalar> ks)
 {
+    // get box size
+    Scalar3 box_dims = m_pdata->getBox().getL();
+    Scalar L[3] = {box_dims.x, box_dims.y, box_dims.z};
+
     // copy numpy matrix to Eigen matrix
     Nk = ks.shape(0);
     auto r = ks.unchecked<2>();
@@ -136,7 +151,7 @@ void CollectiveMode::set_ks(pybind11::array_t<Scalar> ks)
     {
         for (unsigned int i = 0; i < Nk; i++)
         {
-            ks_mat(i,j) = r(i,j);
+            ks_mat(i,j) = 2*M_PI*r(i,j) / L[j];
         }
     }
 

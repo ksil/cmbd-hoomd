@@ -11,11 +11,11 @@ using namespace hoomd;
 // definitions to call the correct cublas functions depending on specified precision
 #ifdef SINGLE_PRECISION
 
-#define SINCOSPI(...) sincospif(__VA_ARGS__)
+#define SINCOS(...) sincosf(__VA_ARGS__)
 
 #else
 
-#define SINCOSPI(...) sincospi(__VA_ARGS__)
+#define SINCOS(...) sincos(__VA_ARGS__)
 
 #endif
 
@@ -25,6 +25,20 @@ using namespace hoomd;
 
 extern "C" __global__
 void print_matrix(Scalar* d_mat, int rows, int cols, bool row_major)
+{
+    for (int i = 0; i < rows; i++)
+    {
+        for (int j = 0; j < cols; j++)
+        {
+            if (row_major) printf("%f ", d_mat[cols*i + j]);
+            else printf("%f ", d_mat[j*rows + i]);
+        }
+        printf("\n");
+    }
+}
+
+extern "C" __device__
+void print_device_matrix(Scalar* d_mat, int rows, int cols, bool row_major)
 {
     for (int i = 0; i < rows; i++)
     {
@@ -219,7 +233,7 @@ alpha
     alpha = 0 corresponds to typical Brownian dynamics
 timestep
     the current timestep
-seed
+wave_seed
     a random seed
     MUST BE DIFFERENT than the seed for the self part above
 
@@ -233,7 +247,6 @@ void calculate_dft_and_reduce(const Scalar4* d_pos,
                     Scalar* d_dft_cos,
                     Scalar* d_dft_sin,
                     const Scalar* d_ks_mat,
-                    const BoxDim box,
                     const unsigned int N,
                     const unsigned int D,
                     const unsigned int Nk,
@@ -241,7 +254,7 @@ void calculate_dft_and_reduce(const Scalar4* d_pos,
                     const Scalar T,
                     const Scalar alpha,
                     const int timestep,
-                    const unsigned int seed)
+                    const unsigned int wave_seed)
 {
     extern __shared__ Scalar ks[];
 
@@ -264,8 +277,6 @@ void calculate_dft_and_reduce(const Scalar4* d_pos,
     Scalar4 p, F;
     unsigned int p_idx;
 
-    Scalar3 L = box.getL();
-
     if (idx < N)
     {
         p_idx = d_index_array[idx];
@@ -281,7 +292,6 @@ void calculate_dft_and_reduce(const Scalar4* d_pos,
 
     if (D == 2)
     {
-        L.z = 1.0;
         p.z = 0.0;
         F.z = 0.0;
     }
@@ -290,6 +300,8 @@ void calculate_dft_and_reduce(const Scalar4* d_pos,
     Scalar dft_cos;
     Scalar dft_sin;
     Scalar cf_x, cf_y, cf_z, sf_x, sf_y, sf_z;
+    detail::Saru saru(idx, timestep, wave_seed);
+    Scalar dt_a_Nk = dt*alpha/Nk;
 
     for (int kidx = 0; kidx < Nk; kidx++)
     {
@@ -297,8 +309,8 @@ void calculate_dft_and_reduce(const Scalar4* d_pos,
         int i = (blockIdx.x + kidx) % Nk;
 
         // argument is 2 * pi * dot(k, x/L)
-        Scalar arg = 2*(ks[3*i]*p.x/L.x + ks[3*i+1]*p.y/L.y + ks[3*i+2]*p.z/L.z);
-        SINCOSPI(arg, &dft_sin, &dft_cos);
+        Scalar arg = ks[3*i]*p.x + ks[3*i+1]*p.y + ks[3*i+2]*p.z;
+        SINCOS(arg, &dft_sin, &dft_cos);
 
         // save values to d_dft arrays
         if (idx < N)
@@ -308,12 +320,40 @@ void calculate_dft_and_reduce(const Scalar4* d_pos,
         }
 
         // calculate action on forces
-        cf_x = dt*alpha/Nk * dft_cos * F.x;
-        cf_y = dt*alpha/Nk * dft_cos * F.y;
-        cf_z = dt*alpha/Nk * dft_cos * F.z;
-        sf_x = dt*alpha/Nk * dft_sin * F.x;
-        sf_y = dt*alpha/Nk * dft_sin * F.y;
-        sf_z = dt*alpha/Nk * dft_sin * F.z;
+        cf_x = dt_a_Nk * dft_cos * F.x;
+        cf_y = dt_a_Nk * dft_cos * F.y;
+        cf_z = dt_a_Nk * dft_cos * F.z;
+        sf_x = dt_a_Nk * dft_sin * F.x;
+        sf_y = dt_a_Nk * dft_sin * F.y;
+        sf_z = dt_a_Nk * dft_sin * F.z;
+
+        // add random wave-space displacement
+        if (idx < 6)
+        {
+            Scalar rand_disp = fast::sqrt(Scalar(3.0)*Scalar(2.0)*T*dt*alpha/Nk) * saru.s<Scalar>(-1,1);
+
+            switch(idx)
+            {
+                case 0:
+                    cf_x += rand_disp;
+                    break;
+                case 1:
+                    cf_y += rand_disp;
+                    break;
+                case 2:
+                    cf_z += rand_disp;
+                    break;
+                case 3:
+                    sf_x -= rand_disp;
+                    break;
+                case 4:
+                    sf_y -= rand_disp;
+                    break;
+                case 5:
+                    sf_z -= rand_disp;
+                    break;
+            }
+        }
 
         // warp reduce
         for (int offset = WARP_SIZE / 2; offset > 0; offset /= 2)
@@ -335,35 +375,6 @@ void calculate_dft_and_reduce(const Scalar4* d_pos,
             atomicAdd(&d_B_T_F_sin[3*i], sf_x);
             atomicAdd(&d_B_T_F_sin[3*i+1], sf_y);
             atomicAdd(&d_B_T_F_sin[3*i+2], sf_z);
-        }
-
-        // add random wave-space displacement
-        if (idx < 6)
-        {
-            detail::Saru saru(6*i + idx, timestep, seed);
-            Scalar rand_disp = fast::sqrt(Scalar(3.0)*Scalar(2.0)*T*dt*alpha/Nk) * saru.s<Scalar>(-1,1);
-
-            switch(idx)
-            {
-                case 0:
-                    atomicAdd(&d_B_T_F_cos[3*i], rand_disp);
-                    break;
-                case 1:
-                    atomicAdd(&d_B_T_F_cos[3*i+1], rand_disp);
-                    break;
-                case 2:
-                    atomicAdd(&d_B_T_F_cos[3*i+2], rand_disp);
-                    break;
-                case 3:
-                    atomicAdd(&d_B_T_F_sin[3*i], -rand_disp);
-                    break;
-                case 4:
-                    atomicAdd(&d_B_T_F_sin[3*i+1], -rand_disp);
-                    break;
-                case 5:
-                    atomicAdd(&d_B_T_F_sin[3*i+2], -rand_disp);
-                    break;
-            }
         }
     }
 
@@ -455,7 +466,6 @@ cudaError_t gpu_collective(unsigned int timestep,
                     d_dft_cos,
                     d_dft_sin,
                     d_ks_mat,
-                    box,
                     N,
                     D,
                     Nk,
