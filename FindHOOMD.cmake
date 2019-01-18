@@ -14,7 +14,7 @@
 # as a convenience (for the intended purpose of this find script), all include directories and definitions needed
 # to compile with all the various libs (boost, python, winsoc, etc...) are set within this script
 
-set(HOOMD_ROOT /home/silmore/hoomd-install/hoomd CACHE FILEPATH "Directory containing a hoomd installation (i.e. _hoomd.so)")
+set(HOOMD_ROOT /usr/local/hoomd-install/hoomd CACHE FILEPATH "Directory containing a hoomd installation (i.e. _hoomd.so)")
 
 # Let HOOMD_ROOT take precedence, but if unset, try letting Python find a hoomd package in its default paths.
 if(HOOMD_ROOT)
