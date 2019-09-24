@@ -428,6 +428,21 @@ void project_ks(Scalar* d_B_T_F_cos, Scalar* d_B_T_F_sin, const Scalar* d_ks_nor
     }
 }
 
+/*
+zeros out arrays
+*/
+extern "C" __global__
+void zero_matrices(Scalar* d_B_T_F_cos, Scalar* d_B_T_F_sin, const unsigned int Nk)
+{
+	int idx = threadIdx.x;
+
+	if (idx < 3*Nk)
+	{
+		d_B_T_F_cos[idx] = 0.0;
+		d_B_T_F_sin[idx] = 0.0;
+	}
+}
+
 // ============================== MAIN FXN =============================================
 
 cudaError_t gpu_collective(unsigned int timestep,
@@ -455,8 +470,9 @@ cudaError_t gpu_collective(unsigned int timestep,
                         const Scalar* d_A_half_mat)
 {
     // zero out reduction matrices
-    cudaMemset(d_B_T_F_cos, 0, Nk*3*sizeof(Scalar));
-    cudaMemset(d_B_T_F_sin, 0, Nk*3*sizeof(Scalar));
+    // cudaMemset(d_B_T_F_cos, 0, Nk*3*sizeof(Scalar));
+    // cudaMemset(d_B_T_F_sin, 0, Nk*3*sizeof(Scalar));
+    zero_matrices<<< 1, 3*Nk >>>(d_B_T_F_cos, d_B_T_F_sin, Nk);
 
     calculate_dft_and_reduce<<< N/BLOCK_SIZE + 1, BLOCK_SIZE, 3*Nk*sizeof(Scalar) >>>(d_pos,
                     d_index_array,
