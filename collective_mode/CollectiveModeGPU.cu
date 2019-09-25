@@ -270,25 +270,22 @@ void calculate_dft_and_reduce(const Scalar4* d_pos,
         idx += BLOCK_SIZE;
     }
 
-    __syncthreads();
+    // __syncthreads(); // don't need this because of ballot_sync below
 
-    // calculate discrete fourier transform
+    // variables for discrete fourier transform
     idx = blockIdx.x * blockDim.x + threadIdx.x;
     Scalar4 p, F;
     unsigned int p_idx;
 
-    if (idx < N)
-    {
-        p_idx = d_index_array[idx];
-        p = d_pos[p_idx];
-        F = d_net_force[p_idx];
-    }
-    else
-    {
-        p = make_scalar4(0.0, 0.0, 0.0, 0.0);
-        F = make_scalar4(0.0, 0.0, 0.0, 0.0);
-    }
+    // calculate reduction mask
+    unsigned mask = __ballot_sync(FULL_MASK, idx < N);
 
+    if (idx >= N)
+    	return;
+
+    p_idx = d_index_array[idx];
+    p = d_pos[p_idx];
+    F = d_net_force[p_idx];
 
     if (D == 2)
     {
@@ -358,12 +355,12 @@ void calculate_dft_and_reduce(const Scalar4* d_pos,
         // warp reduce
         for (int offset = WARP_SIZE / 2; offset > 0; offset /= 2)
         {
-            cf_x += __shfl_down_sync(FULL_MASK, cf_x, offset);
-            cf_y += __shfl_down_sync(FULL_MASK, cf_y, offset);
-            cf_z += __shfl_down_sync(FULL_MASK, cf_z, offset);
-            sf_x += __shfl_down_sync(FULL_MASK, sf_x, offset);
-            sf_y += __shfl_down_sync(FULL_MASK, sf_y, offset);
-            sf_z += __shfl_down_sync(FULL_MASK, sf_z, offset);
+            cf_x += __shfl_down_sync(mask, cf_x, offset);
+            cf_y += __shfl_down_sync(mask, cf_y, offset);
+            cf_z += __shfl_down_sync(mask, cf_z, offset);
+            sf_x += __shfl_down_sync(mask, sf_x, offset);
+            sf_y += __shfl_down_sync(mask, sf_y, offset);
+            sf_z += __shfl_down_sync(mask, sf_z, offset);
         }
 
         // device-wide atomic reduction
