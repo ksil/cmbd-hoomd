@@ -3,7 +3,8 @@ A HOOMD-blue plugin for Collective Mode Brownian Dynamics to accelerate the equi
 
 See the following paper for details about the theory and implementation:
 
-*TBA*
+K. S. Silmore and J. W. Swan, ["Collective mode Brownian dynamics: A method for fast relaxation of statistical ensembles"](https://doi.org/10.1063/1.5129648), J. Chem. Phys. 152, 094104 (2020). [doi: 10.1063/1.5129648](https://doi.org/10.1063/1.5129648)
+
 
 ## HOOMD-blue Installation
 
